@@ -1,0 +1,205 @@
+---
+title: "Tubes Komstat"
+author: "Erma Daniar Safitri"
+date: "2025-11-20"
+output: html_document
+---
+
+```{r}
+install.packages("evd")
+```
+
+```{r}
+library(MASS) #fitting distribusi
+library (stats) #uji ks
+library(moments) #skewness & kurtosis
+library(ggplot2) #visualisasi
+library(evd)
+library(fitdistrplus)
+```
+
+```{r}
+data <- read.csv("C:/Users/User/Downloads/Dataset fix.csv")
+```
+
+```{r}
+head(data)
+```
+
+```{r}
+# Ubah jadi numerik, ganti string yang tidak dapat dikonversi ke NA
+data$Curah_Hujan <- as.numeric(data$Curah_Hujan)
+
+# Hapus NA dan nominal tak valid
+data_bersih <- na.omit(data$Curah_Hujan)
+data_positif <- data_bersih[data_bersih > 0]
+
+# Cek hasilnya
+length(data_positif)
+head(data_positif)
+
+```
+
+```{r}
+# Weibull
+fit_weibull <- fitdist(data, "weibull")
+
+# Lognormal
+fit_lognorm <- fitdist(data, "lnorm")
+
+# Gumbel (menggunakan dist dari 'evd')
+fit_gumbel <- fgev(data, type="GEV")  # GEV dengan shape = 0 = Gumbel
+# Paksa shape=0
+fit_gumbel$estimate["shape"] <- 0
+
+```
+
+```{r}
+# Estimasi dan fitting distribusi: gunakan log-normal (sering cocok untuk curah hujan)
+fit <- fitdistr(data_positif[data_positif > 0], "lognormal")
+meanlog <- fit$estimate['meanlog']
+sdlog <- fit$estimate['sdlog']
+
+```
+
+```{r}
+sdlog_new <- sdlog * 0.6
+meanlog_new <- meanlog
+
+```
+
+```{r}
+simulasi_baru <- rlnorm(length(data_positif), meanlog_new, sdlog_new)
+kurtosis(simulasi_baru)
+```
+
+```{r}
+# Fungsi invers CDF distribusi log-normal
+inverse_cdf <- function(u) {
+  qlnorm(u, meanlog, sdlog)
+}
+```
+
+```{r}
+# Pembangkitan bilangan acak uniform
+set.seed(123)
+n <- 1000
+u <- runif(n)
+```
+
+```{r}
+# Generate data simulasi menggunakan inverse transform sampling
+simulasi <- inverse_cdf(u)
+```
+
+```{r}
+# Analisis statistik deskriptif data asli 
+stat_asli <- data.frame(
+  Mean = mean(data_positif),
+  Median = median(data_positif),
+  Skewness = skewness(data_positif),
+  Kurtosis = kurtosis(data_positif)
+)
+
+stat_simulasi <- data.frame(
+  Mean = mean(simulasi),
+  Median = median(simulasi),
+  Skewness = skewness(simulasi),
+  Kurtosis = kurtosis(simulasi)
+)
+
+print("Statistik Data Asli:")
+print(stat_asli)
+```
+
+```{r}
+# Analisis statistik deskriptif data simulasi
+stat_simulasi <- data.frame(
+  Mean = mean(simulasi_baru),
+  Median = median(simulasi_baru),
+  Skewness = skewness(simulasi_baru),
+  Kurtosis = kurtosis(simulasi_baru)
+)
+
+print("Statistik Data Simulasi:")
+print(stat_simulasi)
+```
+
+```{r}
+# Visualisasi perbandingan histogram, density, dan CDF
+df_asli <- data.frame(nilai = data_positif, jenis = "Data Asli")
+df_sim <- data.frame(nilai = simulasi, jenis = "Simulasi")
+df_all <- rbind(df_asli, df_sim)
+```
+
+```{r}
+hist <- ggplot(df_all, aes(x = nilai, fill = jenis)) +
+  geom_histogram(aes(y = ..density..),
+                 position = "identity",
+                 alpha = 0.5,
+                 bins = 40) +
+  scale_fill_manual(values = c("Data Asli" = "blue",
+                               "Simulasi" = "pink")) +
+  coord_cartesian(xlim = c(0, 300)) +
+  labs(
+    title = "Histogram Curah Hujan",
+    x = "Curah Hujan (mm)",
+    y = "Density",
+    fill = "Jenis Data"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", size = 16),
+    panel.grid.minor = element_blank()
+  )
+
+hist
+```
+
+```{r}
+density <- ggplot(df_all, aes(x = nilai, color = jenis)) +
+  geom_density(linewidth = 1.2) +
+  scale_color_manual(values = c("Data Asli" = "#1E40AF",
+                                "Simulasi" = "#B91C1C")) +
+  coord_cartesian(xlim = c(0, 300)) +
+  labs(
+    title = "Kurva Density Curah Hujan",
+    x = "Curah Hujan (mm)",
+    y = "Density",
+    color = "Jenis Data"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", size = 16),
+    panel.grid.minor = element_blank()
+  )
+
+density
+```
+
+```{r}
+#plot cdf
+ggplot(df_all, aes(x = nilai, color = jenis)) +
+  stat_ecdf(size = 1) +
+  scale_color_manual(values = c("Data Asli" = "blue", 
+                                "Simulasi" = "red")) +
+  coord_cartesian(xlim = c(0, 300)) +   # 🔥 memperbaiki tampilan CDF
+  labs(
+    title = "Fungsi Distribusi Kumulatif (CDF)",
+    x = "Curah Hujan (mm)",
+    y = "Empirical CDF",
+    color = "Jenis"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", size = 16),
+    panel.grid.minor = element_blank()
+  )
+```
+
+```{r}
+# Validasi dengan uji Kolmogorov-Smirnov
+ks_test <- ks.test(simulasi, "plnorm", meanlog, sdlog)
+print("Hasil Uji Kolmogorov-Smirnov Simulasi vs Distribusi Lognormal:")
+print(ks_test)
+```
